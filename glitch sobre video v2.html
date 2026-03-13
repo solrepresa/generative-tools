@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glitch Orgánico</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100vw; height: 100vh; background: #000; overflow: hidden; cursor: none; }
+
+  #drop-zone {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #000;
+    transition: opacity .6s;
+  }
+  #drop-zone.hidden { opacity: 0; pointer-events: none; }
+
+  .drop-inner {
+    border: 1px solid rgba(255,255,255,.12);
+    padding: 52px 64px;
+    text-align: center;
+    position: relative;
+  }
+  .drop-inner::before {
+    content: '';
+    position: absolute; inset: -6px;
+    border: 1px solid rgba(255,255,255,.04);
+  }
+
+  .drop-title {
+    font-family: 'Courier New', monospace;
+    font-size: 11px; letter-spacing: .35em; text-transform: uppercase;
+    color: rgba(255,255,255,.18); margin-bottom: 28px;
+  }
+  .drop-icon {
+    font-size: 38px; margin-bottom: 20px; display: block;
+    opacity: .35; filter: grayscale(1);
+  }
+  .drop-label {
+    font-family: 'Courier New', monospace;
+    font-size: 9px; letter-spacing: .2em; text-transform: uppercase;
+    color: rgba(255,255,255,.1);
+    margin-top: 22px;
+  }
+  .drop-btn {
+    display: inline-block; margin-top: 20px;
+    font-family: 'Courier New', monospace;
+    font-size: 9px; letter-spacing: .22em; text-transform: uppercase;
+    color: rgba(255,185,55,.6);
+    background: none; border: 1px solid rgba(255,185,55,.18);
+    padding: 10px 22px; cursor: pointer;
+    transition: all .2s;
+  }
+  .drop-btn:hover { color: rgba(255,185,55,.9); background: rgba(255,185,55,.04); }
+
+  #drop-zone.drag-over .drop-inner { border-color: rgba(255,185,55,.3); }
+
+  /* hidden file input */
+  #file-input { display: none; }
+
+  /* video hidden behind everything */
+  #vid {
+    position: fixed; opacity: 0; pointer-events: none;
+    width: 1px; height: 1px; top: 0; left: 0;
+  }
+
+  /* Hydra canvas fills screen */
+  canvas { position: fixed !important; top: 0 !important; left: 0 !important;
+           width: 100vw !important; height: 100vh !important; }
+
+  /* UI controls — same style as original */
+  #ui { position: fixed; z-index: 10; inset: 0; pointer-events: none; font-family: monospace; }
+  #vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(0,0,0,.6) 100%);
+  }
+  #controls {
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; pointer-events: all; opacity: 0; transition: opacity .4s;
+  }
+  body:hover #controls { opacity: 1; }
+  .btn {
+    background: rgba(0,0,0,.75); border: 1px solid rgba(255,255,255,.08); border-right: none;
+    color: rgba(255,255,255,.25); font-family: monospace; font-size: 9px;
+    letter-spacing: .12em; text-transform: uppercase;
+    padding: 8px 15px; cursor: pointer; transition: all .2s; white-space: nowrap;
+  }
+  .btn:last-child { border-right: 1px solid rgba(255,255,255,.08); }
+  .btn:hover { color: rgba(255,185,55,.9); background: rgba(255,185,55,.04); }
+  .btn.on { color: rgba(255,185,55,.75); }
+
+  #preset-label {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    font-family: 'Courier New', monospace; font-size: 9px;
+    letter-spacing: .3em; text-transform: uppercase;
+    color: rgba(255,255,255,.1); pointer-events: none;
+    transition: opacity 1s;
+    z-index: 10;
+  }
+
+  #cursor {
+    position: fixed; z-index: 200; width: 5px; height: 5px; border-radius: 50%;
+    background: rgba(255,200,80,.85); pointer-events: none;
+    transform: translate(-50%,-50%);
+    box-shadow: 0 0 10px rgba(255,170,30,.7);
+  }
+</style>
+</head>
+<body>
+
+<!-- Drop zone -->
+<div id="drop-zone">
+  <div class="drop-inner">
+    <div class="drop-title">Glitch Orgánico</div>
+    <span class="drop-icon">▭</span>
+    <div style="font-family:'Courier New',monospace;font-size:28px;color:rgba(255,255,255,.08);letter-spacing:.1em;">
+      arrastrá tu video
+    </div>
+    <div class="drop-label">mp4 · mov · webm</div>
+    <button class="drop-btn" id="browse-btn">o elegí un archivo</button>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="video/*">
+<video id="vid" autoplay loop muted playsinline crossorigin></video>
+
+<div id="ui">
+  <div id="vignette"></div>
+  <div id="controls">
+    <button class="btn on"  id="btn-play">⏸ pausar</button>
+    <button class="btn"     id="btn-preset">modo 1/5</button>
+    <button class="btn"     id="btn-spd">vel ×1</button>
+    <button class="btn"     id="btn-reset">reset</button>
+  </div>
+</div>
+
+<div id="preset-label" id="preset-label">— glitch fluido —</div>
+<div id="cursor"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/hydra-synth/dist/hydra-synth.js"></script>
+<script>
+'use strict';
+
+// ─── DROP / FILE ──────────────────────────────────────────────────────────────
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const vid       = document.getElementById('vid');
+
+document.getElementById('browse-btn').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()=> dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if(f && f.type.startsWith('video/')) loadFile(f);
+});
+
+function loadFile(file){
+  const url = URL.createObjectURL(file);
+  vid.src = url;
+  vid.play();
+  vid.addEventListener('loadeddata', startHydra, { once: true });
+}
+
+// ─── HYDRA ────────────────────────────────────────────────────────────────────
+let hydra, run = true, currentPreset = 0;
+const PRESETS = [
+  'glitch fluido',
+  'membrana líquida',
+  'corrosión cromática',
+  'pulso orgánico',
+  'deriva fractal',
+  'mi efecto',  // ← nuevo
+];
+
+function startHydra(){
+  dropZone.classList.add('hidden');
+
+  hydra = new Hydra({
+    detectAudio: false,
+    makeGlobal: true,
+    width:  window.innerWidth,
+    height: window.innerHeight,
+  });
+
+  // fuente: el elemento video
+  s0.init({ src: vid });
+
+  applyPreset(0);
+}
+
+// ─── PRESETS ──────────────────────────────────────────────────────────────────
+function applyPreset(n){
+  currentPreset = n;
+  document.getElementById('preset-label').textContent =
+    '— ' + PRESETS[n] + ' —';
+  document.getElementById('btn-preset').textContent =
+    'modo ' + (n+1) + '/' + PRESETS.length;
+
+
+  // limpiar salida
+  solid(0,0,0,1).out(o0);
+  solid(0,0,0,1).out(o1);
+  solid(0,0,0,1).out(o2);
+  solid(0,0,0,1).out(o3);
+
+  switch(n){
+
+    // 0 — GLITCH FLUIDO
+    // desplazamiento de color con noise orgánico + feedback suave
+    case 0:
+      src(s0)
+        .modulateScale(
+          noise(2.5, 0.35).rotate(() => time * 0.08), 0.04
+        )
+        .modulate(
+          osc(3, 0.04, 0).rotate(() => time * 0.05),
+          0.012
+        )
+        .color(1.05, 0.92, 1.08)
+        .blend(
+          src(o0).scale(1.002).modulate(noise(1.5), 0.005),
+          0.18
+        )
+        .out(o0);
+      render(o0);
+      break;
+
+    // 1 — MEMBRANA LÍQUIDA
+    // el video se deforma como una membrana que respira
+    case 1:
+      src(s0)
+        .modulate(
+          osc(2, 0.03, 1.5)
+            .modulate(noise(3, 0.2), 0.08)
+            .rotate(() => Math.sin(time * 0.12) * 0.4),
+          0.025
+        )
+        .saturate(1.3)
+        .brightness(0.02)
+        .blend(src(o0).scale(1.001), 0.12)
+        .out(o0);
+      render(o0);
+      break;
+
+    // 2 — CORROSIÓN CROMÁTICA
+    // separación RGB + glitch de desplazamiento
+    case 2:
+      src(s0)
+        .color(1.6, 0, 0)
+        .modulate(noise(4, 0.5), 0.018)
+        .blend(
+          src(s0)
+            .color(0, 1.4, 0)
+            .modulate(noise(4, 0.5).rotate(2.1), 0.018),
+          0.5
+        )
+        .blend(
+          src(s0)
+            .color(0, 0, 1.8)
+            .modulate(noise(4, 0.5).rotate(4.2), 0.018),
+          0.33
+        )
+        .modulate(
+          osc(8, 0.02, 0).thresh(0.85, 0.05),
+          0.008
+        )
+        .out(o0);
+      render(o0);
+      break;
+
+    // 3 — PULSO ORGÁNICO
+    // el video late, se expande y contrae con noise lento
+    case 3:
+      src(s0)
+        .scale(
+          () => 1 + Math.sin(time * 0.4) * 0.015,
+          () => 1 + Math.cos(time * 0.31) * 0.012
+        )
+        .modulate(
+          noise(1.8, 0.15).rotate(() => time * 0.06),
+          0.022
+        )
+        .brightness(() => Math.sin(time * 0.4) * 0.03)
+        .saturate(1.2)
+        .blend(src(o0).scale(1.0015), 0.14)
+        .out(o0);
+      render(o0);
+      break;
+
+    // 4 — DERIVA FRACTAL
+    // el video se multiplica y desplaza en capas
+    case 4:
+      src(s0)
+        .modulateScale(
+          osc(1.5, 0.02, 0)
+            .modulate(noise(2, 0.3), 0.1),
+          0.06
+        )
+        .scale(0.9)
+        .blend(
+          src(s0).scale(0.7).rotate(() => time * 0.03),
+          0.35
+        )
+        .blend(
+          src(o0).scale(1.003).modulate(noise(1), 0.003),
+          0.22
+        )
+        .out(o0);
+      render(o0);
+      break;
+
+    case 5:  // modo personalizado
+      src(s0)
+        // ← acá pegás cadena de efectos de Hydra
+        .modulate(osc(4, 0.1), 0.05)
+        .out(o0);
+      render(o0);
+      break;
+  }
+}
+
+// ─── MOUSE ────────────────────────────────────────────────────────────────────
+const cur = document.getElementById('cursor');
+window.addEventListener('mousemove', e => {
+  cur.style.left = e.clientX + 'px';
+  cur.style.top  = e.clientY + 'px';
+});
+
+// ─── CONTROLES ────────────────────────────────────────────────────────────────
+const bPlay = document.getElementById('btn-play');
+bPlay.addEventListener('click', () => {
+  run = !run;
+  if(vid.src) run ? vid.play() : vid.pause();
+  bPlay.textContent = run ? '⏸ pausar' : '▶ reanudar';
+  bPlay.classList.toggle('on', run);
+});
+
+document.getElementById('btn-preset').addEventListener('click', () => {
+  if(!hydra) return;
+  applyPreset((currentPreset + 1) % PRESETS.length);
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if(!hydra) return;
+  applyPreset(currentPreset);
+});
+
+const spds = [.25, .5, 1, 1.5, 2], slbls = ['×0.25','×0.5','×1','×1.5','×2'];
+let si = 2;
+document.getElementById('btn-spd').addEventListener('click', function(){
+  si = (si + 1) % spds.length;
+  // afecta la velocidad del video
+  if(vid) vid.playbackRate = spds[si];
+  this.textContent = 'vel ' + slbls[si];
+});
+
+window.addEventListener('resize', () => {
+  if(hydra){
+    hydra.setResolution(window.innerWidth, window.innerHeight);
+  }
+});
+</script>
+</body>
+</html>
